@@ -56,8 +56,9 @@ struct group {
 struct userdata {
     pa_core *core;
     PA_LLIST_HEAD(struct group, groups);
-    bool global:1;
-    bool duck:1;
+    bool global;
+    bool duck;
+    bool duck_while_corked;
 };
 
 static const char *sink_input_role(pa_sink_input *sink_input) {
@@ -85,7 +86,7 @@ static bool update_group_active(struct userdata *u, struct group *g) {
     if (pa_hashmap_size(g->trigger_state) > 0) {
         PA_HASHMAP_FOREACH_KV(sink_input, value, g->trigger_state, state) {
             if (!sink_input->muted &&
-                sink_input->state != PA_SINK_INPUT_CORKED) {
+                (u->duck_while_corked || sink_input->state != PA_SINK_INPUT_CORKED)) {
                 new_active = true;
                 break;
             }
@@ -465,7 +466,6 @@ static int count_groups(pa_modargs *ma, const char *module_argument) {
 int pa_stream_interaction_init(pa_module *m, const char* const v_modargs[]) {
     pa_modargs *ma = NULL;
     struct userdata *u;
-    bool global = false;
     uint32_t i = 0;
     uint32_t group_count_tr = 0;
     struct group *last = NULL;
@@ -541,11 +541,15 @@ int pa_stream_interaction_init(pa_module *m, const char* const v_modargs[]) {
         if (!group_parse_roles(ma, "volume", group_value_add_volume, u->groups))
             goto fail;
 
-    if (pa_modargs_get_value_boolean(ma, "global", &global) < 0) {
+    if (pa_modargs_get_value_boolean(ma, "global", &u->global) < 0) {
         pa_log("Invalid boolean parameter: global");
         goto fail;
     }
-    u->global = global;
+
+    if (pa_modargs_get_value_boolean(ma, "duck_while_corked", &u->duck_while_corked) < 0) {
+        pa_log("Invalid boolean parameter: duck_while_corked");
+        goto fail;
+    }
 
     pa_module_hook_connect(m, &m->core->hooks[PA_CORE_HOOK_SINK_INPUT_PUT], PA_HOOK_LATE, (pa_hook_cb_t) sink_input_put_cb, u);
     pa_module_hook_connect(m, &m->core->hooks[PA_CORE_HOOK_SINK_INPUT_UNLINK], PA_HOOK_LATE, (pa_hook_cb_t) sink_input_unlink_cb, u);
